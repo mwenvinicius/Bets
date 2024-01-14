@@ -45,8 +45,11 @@ contract ApostasBlock{
     mapping(uint256 => mapping(uint256 => Aposta)) public apostas;
     address public admin; // Admin primeira conta que executar o contato.
 
+    event SorteioInfo(uint256 Acumulado,uint256 Distributed,uint256 Prize);
+    event Sorteados(uint256[] sorteados);
+    event Acumulativo(uint256 Acumulativo);
     event Ganhadores(uint256 idDoSorteio, address usuario, uint256[] sorteados);
-
+    event apos(uint256[] valoresAtuais,uint256[] valoresApostados);
     constructor() {
         admin = msg.sender;
     }
@@ -58,7 +61,7 @@ contract ApostasBlock{
         _;
     }
 
-    event apos(uint256[] valoresAtuais,uint256[] valoresApostados);
+    
 
     function pegarHoraMinutoAtual() public view returns (uint[2] memory) {
         uint timestamp = block.timestamp;
@@ -70,7 +73,7 @@ contract ApostasBlock{
 
     function sortearNumero() public view returns (uint256) {
         uint256 numero = uint(keccak256(abi.encodePacked(blockhash(block.number-1),block.timestamp)));
-        return (numero % 3)+1;
+        return (numero % 2)+1;
     }
 
     function bolha(uint256[] memory valoresApostas) public pure returns (uint256[] memory){
@@ -151,7 +154,7 @@ contract ApostasBlock{
         sorteioAtual.apostas.push(sorteioAtual.apostas.length);
     }
 
-    function realizaSorteio(uint256 _idDoSorteio) public apenasAdmin {
+    function realizaSorteio(uint256 _idDoSorteio) public payable apenasAdmin {
         require(_idDoSorteio < qnt, "Esse ID eh incorreto!");
         Sorteio storage sorteioAtual = listaSorteios[_idDoSorteio];
         // require(sorteioAtual.aberto, "Sorteio nao esta em andamento!!!");
@@ -167,40 +170,65 @@ contract ApostasBlock{
             uint256 valor = sortearNumero();
             sorteados[j] = valor;
         }
-       /*  uint256[] storage todasApostas = sorteioAtual.apostas; */
+        emit Sorteados(sorteados);
+        
+        // uint256[] storage todasApostas = sorteioAtual.apostas;
         for (uint256 i = 0; i < sorteioAtual.apostas.length; i++){
             Aposta storage apostaAtual = apostas[_idDoSorteio][i];
             acumulativo += apostaAtual.valorApostado;
         }
+        emit Acumulativo(acumulativo);
+        
         uint256[] memory sorteadosOrdenados = bolha(sorteados);
         sorteioAtual.valoresSorteados = sorteadosOrdenados;
         sorteioAtual.Acumulado = acumulativo;
-        /* Definir quem Ganhou ou Não! */
+        
+        // Definir quem Ganhou ou Não!
+        
         uint256 ganhadores = 0;
         for (uint256 k = 0; k < sorteioAtual.apostas.length; k++){
             Aposta storage apostaAtual = apostas[_idDoSorteio][k];
             if(comparaApostas(sorteadosOrdenados,apostaAtual.valores)){
                 apostaAtual.estado = estadoAposta.GANHOU;
                 ganhadores+=1;
+                emit Ganhadores(_idDoSorteio,apostaAtual.usuario,apostaAtual.valores);
             }
             else{
                 apostaAtual.estado = estadoAposta.PERDEU;
             }
         }
-        /* Realizar Transferência em Ether para os Ganhadores! */
-        uint256 porcentagem = (acumulativo)*(sorteioAtual.porcentagemDoValor/100);
-        sorteioAtual.Distributed = porcentagem;
-        uint256 paraCadaGanhador = acumulativo/ganhadores;
-        sorteioAtual.Prize = paraCadaGanhador;
-        payable(msg.sender).transfer(acumulativo); 
-        for (uint256 k = 0; k < sorteioAtual.apostas.length; k++){
-            Aposta storage apostaAtual = apostas[_idDoSorteio][k];
+        
+        // Cálculo de porcentagem do valor.
+        /* uint256 porcentagem = (sorteioAtual.porcentagemDoValor).div(100); */
+        uint256 porcentagem2 = (sorteioAtual.Acumulado*sorteioAtual.porcentagemDoValor)/100;
+        sorteioAtual.Distributed = porcentagem2;
+
+
+        uint256 paraCadaGanhador;
+        if(ganhadores!=0){ paraCadaGanhador = porcentagem2/ganhadores;}
+        else{ paraCadaGanhador = 0;}
+        sorteioAtual.Prize = paraCadaGanhador;   
+        emit SorteioInfo(sorteioAtual.Acumulado,sorteioAtual.Distributed,sorteioAtual.Prize);
+        for (uint256 l = 0; l < sorteioAtual.apostas.length; l++){
+            Aposta storage apostaAtual = apostas[_idDoSorteio][l];
             if(apostaAtual.estado == estadoAposta.GANHOU){
                 emit Ganhadores(_idDoSorteio,apostaAtual.usuario,apostaAtual.valores);
-                payable(apostaAtual.usuario).transfer(paraCadaGanhador);
             }
         }
+        
+        for (uint256 l = 0; l < sorteioAtual.apostas.length; l++){
+            Aposta storage apostaAtual = apostas[_idDoSorteio][l];
+            if(apostaAtual.estado == estadoAposta.GANHOU){
+                bool transferSuccess = payable(apostaAtual.usuario).send(sorteioAtual.Prize);
+            }
+        }
+        payable(msg.sender).transfer(acumulativo-sorteioAtual.Distributed);
+    }
 
+    function exibeInforSorteio(uint256 _idDoSorteio) public view returns(uint256[3] memory){
+        require(_idDoSorteio < qnt, "Esse ID eh incorreto!");
+        Sorteio memory sorteioAtual = listaSorteios[_idDoSorteio];
+        return [sorteioAtual.apostas.length,sorteioAtual.Prize,sorteioAtual.Acumulado];
     }
 
 }
