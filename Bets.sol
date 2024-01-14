@@ -34,6 +34,9 @@ contract ApostasBlock{
         string infor;
         uint256[] apostas;
         uint256[] valoresSorteados;
+        uint256 Acumulado;
+        uint256 Distributed;
+        uint256 Prize;
     }
 
     Sorteio[] public listaSorteios;
@@ -41,6 +44,8 @@ contract ApostasBlock{
     // (ID)Sorteio --> (ID)Aposta --> Apostas
     mapping(uint256 => mapping(uint256 => Aposta)) public apostas;
     address public admin; // Admin primeira conta que executar o contato.
+
+    event Ganhadores(uint256 idDoSorteio, address usuario, uint256[] sorteados);
 
     constructor() {
         admin = msg.sender;
@@ -61,6 +66,11 @@ contract ApostasBlock{
         uint horaAtual = ((timestamp - offset * 3600) / 3600) % 24;
         uint minutoAtual = (timestamp / 60) % 60;
         return [horaAtual, minutoAtual];
+    }
+
+    function sortearNumero() public view returns (uint256) {
+        uint256 numero = uint(keccak256(abi.encodePacked(blockhash(block.number-1),block.timestamp)));
+        return (numero % 3)+1;
     }
 
     function bolha(uint256[] memory valoresApostas) public pure returns (uint256[] memory){
@@ -104,7 +114,7 @@ contract ApostasBlock{
         dataLimite.minutoInicial = _minutoInicial;
         dataLimite.horaFinal = _horaFinal;
         dataLimite.minutoFinal = _minutoFinal;
-        listaSorteios.push(Sorteio(dataLimite,_quantidadeSorteados,_porcentagemDoValor,qnt,true,_infor,new uint256[](0),new uint256[](0)));
+        listaSorteios.push(Sorteio(dataLimite,_quantidadeSorteados,_porcentagemDoValor,qnt,true,_infor,new uint256[](0),new uint256[](0),0,0,0));
         qnt+=1;
     }
 
@@ -113,7 +123,7 @@ contract ApostasBlock{
         Sorteio storage sorteioAtual = listaSorteios[_idDoSorteio];
         // Verificando se os valores apostados são do mesma quantidade dos números permitidos.
         require(_numerosApostados.length == sorteioAtual.quantidadeSorteados,"Quantidade de valores diferente do sorteio!");
-        require(msg.value > 0 && msg.value == 5, "A quantia deve ser maior que 0 e igual a 5.");
+        require(msg.value > 0, "A quantia deve ser maior que 0.");
         uint[2] memory tempoAtual = pegarHoraMinutoAtual();
         uint256 horaAtual = tempoAtual[0];
         uint256 minutoAtual = tempoAtual[1];
@@ -123,6 +133,7 @@ contract ApostasBlock{
         Aposta storage aposta = apostas[_idDoSorteio][sorteioAtual.apostas.length];
         uint256[] memory ordenados = bolha(_numerosApostados);
         bool valida = false;
+
         for (uint256 i=0;i<sorteioAtual.apostas.length;i++){
             Aposta memory apostaX = apostas[_idDoSorteio][i];
             if (apostaX.usuario == msg.sender){
@@ -139,4 +150,57 @@ contract ApostasBlock{
         aposta.estado = estadoAposta.EM_ANDAMENTO;
         sorteioAtual.apostas.push(sorteioAtual.apostas.length);
     }
+
+    function realizaSorteio(uint256 _idDoSorteio) public apenasAdmin {
+        require(_idDoSorteio < qnt, "Esse ID eh incorreto!");
+        Sorteio storage sorteioAtual = listaSorteios[_idDoSorteio];
+        // require(sorteioAtual.aberto, "Sorteio nao esta em andamento!!!");
+        // uint[2] memory tempoAtual = pegarHoraMinutoAtual();
+        // uint256 horaAtual = tempoAtual[0];
+        // uint256 minutoAtual = tempoAtual[1];
+        // require((horaAtual > sorteioAtual.data.horaFinal || (horaAtual == sorteioAtual.data.horaFinal && minutoAtual >= sorteioAtual.data.minutoFinal)), "O sorteio esta em andamento!");
+        sorteioAtual.aberto = false;
+        uint256 acumulativo = 0;
+        uint256[] memory sorteados;
+        sorteados = new uint256[](sorteioAtual.quantidadeSorteados);
+        for (uint256 j = 0; j < sorteioAtual.quantidadeSorteados; j++){
+            uint256 valor = sortearNumero();
+            sorteados[j] = valor;
+        }
+       /*  uint256[] storage todasApostas = sorteioAtual.apostas; */
+        for (uint256 i = 0; i < sorteioAtual.apostas.length; i++){
+            Aposta storage apostaAtual = apostas[_idDoSorteio][i];
+            acumulativo += apostaAtual.valorApostado;
+        }
+        uint256[] memory sorteadosOrdenados = bolha(sorteados);
+        sorteioAtual.valoresSorteados = sorteadosOrdenados;
+        sorteioAtual.Acumulado = acumulativo;
+        /* Definir quem Ganhou ou Não! */
+        uint256 ganhadores = 0;
+        for (uint256 k = 0; k < sorteioAtual.apostas.length; k++){
+            Aposta storage apostaAtual = apostas[_idDoSorteio][k];
+            if(comparaApostas(sorteadosOrdenados,apostaAtual.valores)){
+                apostaAtual.estado = estadoAposta.GANHOU;
+                ganhadores+=1;
+            }
+            else{
+                apostaAtual.estado = estadoAposta.PERDEU;
+            }
+        }
+        /* Realizar Transferência em Ether para os Ganhadores! */
+        uint256 porcentagem = (acumulativo)*(sorteioAtual.porcentagemDoValor/100);
+        sorteioAtual.Distributed = porcentagem;
+        uint256 paraCadaGanhador = acumulativo/ganhadores;
+        sorteioAtual.Prize = paraCadaGanhador;
+        payable(msg.sender).transfer(acumulativo); 
+        for (uint256 k = 0; k < sorteioAtual.apostas.length; k++){
+            Aposta storage apostaAtual = apostas[_idDoSorteio][k];
+            if(apostaAtual.estado == estadoAposta.GANHOU){
+                emit Ganhadores(_idDoSorteio,apostaAtual.usuario,apostaAtual.valores);
+                payable(apostaAtual.usuario).transfer(paraCadaGanhador);
+            }
+        }
+
+    }
+
 }
