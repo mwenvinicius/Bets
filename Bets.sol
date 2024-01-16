@@ -61,6 +61,8 @@ contract ApostasBlock{
         _;
     }
 
+    
+
     function pegarHoraMinutoAtual() public view returns (uint[2] memory) {
         uint timestamp = block.timestamp;
         uint offset = 3;
@@ -71,7 +73,7 @@ contract ApostasBlock{
 
     function sortearNumero() public view returns (uint256) {
         uint256 numero = uint(keccak256(abi.encodePacked(blockhash(block.number-1),block.timestamp)));
-        return (numero % 10)+1;
+        return (numero % 2)+1;
     }
 
     function bolha(uint256[] memory valoresApostas) public pure returns (uint256[] memory){
@@ -134,6 +136,7 @@ contract ApostasBlock{
         Aposta storage aposta = apostas[_idDoSorteio][sorteioAtual.apostas.length];
         uint256[] memory ordenados = bolha(_numerosApostados);
         bool valida = false;
+
         for (uint256 i=0;i<sorteioAtual.apostas.length;i++){
             Aposta memory apostaX = apostas[_idDoSorteio][i];
             if (apostaX.usuario == msg.sender){
@@ -154,11 +157,11 @@ contract ApostasBlock{
     function realizaSorteio(uint256 _idDoSorteio) public payable apenasAdmin {
         require(_idDoSorteio < qnt, "Esse ID eh incorreto!");
         Sorteio storage sorteioAtual = listaSorteios[_idDoSorteio];
-        require(sorteioAtual.aberto, "Sorteio nao esta em andamento!!!");
-        uint[2] memory tempoAtual = pegarHoraMinutoAtual();
-        uint256 horaAtual = tempoAtual[0];
-        uint256 minutoAtual = tempoAtual[1];
-        require((horaAtual > sorteioAtual.data.horaFinal || (horaAtual == sorteioAtual.data.horaFinal && minutoAtual >= sorteioAtual.data.minutoFinal)), "O sorteio esta em andamento!");
+        // require(sorteioAtual.aberto, "Sorteio nao esta em andamento!!!");
+        // uint[2] memory tempoAtual = pegarHoraMinutoAtual();
+        // uint256 horaAtual = tempoAtual[0];
+        // uint256 minutoAtual = tempoAtual[1];
+        // require((horaAtual > sorteioAtual.data.horaFinal || (horaAtual == sorteioAtual.data.horaFinal && minutoAtual >= sorteioAtual.data.minutoFinal)), "O sorteio esta em andamento!");
         sorteioAtual.aberto = false;
         uint256 acumulativo = 0;
         uint256[] memory sorteados;
@@ -168,16 +171,20 @@ contract ApostasBlock{
             sorteados[j] = valor;
         }
         emit Sorteados(sorteados);
+        
         // uint256[] storage todasApostas = sorteioAtual.apostas;
         for (uint256 i = 0; i < sorteioAtual.apostas.length; i++){
             Aposta storage apostaAtual = apostas[_idDoSorteio][i];
             acumulativo += apostaAtual.valorApostado;
         }
-        emit Acumulativo(acumulativo); 
+        emit Acumulativo(acumulativo);
+        
         uint256[] memory sorteadosOrdenados = bolha(sorteados);
         sorteioAtual.valoresSorteados = sorteadosOrdenados;
         sorteioAtual.Acumulado = acumulativo;
+        
         // Definir quem Ganhou ou Não!
+        
         uint256 ganhadores = 0;
         for (uint256 k = 0; k < sorteioAtual.apostas.length; k++){
             Aposta storage apostaAtual = apostas[_idDoSorteio][k];
@@ -189,37 +196,46 @@ contract ApostasBlock{
             else{
                 apostaAtual.estado = estadoAposta.PERDEU;
             }
-        }    
+        }
+        
         // Cálculo de porcentagem do valor.
         /* uint256 porcentagem = (sorteioAtual.porcentagemDoValor).div(100); */
-        uint256 porcentagem2 = (sorteioAtual.Acumulado*sorteioAtual.porcentagemDoValor)/100;
-        sorteioAtual.Distributed = porcentagem2;
+        
+
+
         uint256 paraCadaGanhador;
-        if(ganhadores!=0){ paraCadaGanhador = porcentagem2/ganhadores;}
-        else{ paraCadaGanhador = 0;}
+        if(ganhadores!=0){ 
+            uint256 porcentagem2 = (sorteioAtual.Acumulado*sorteioAtual.porcentagemDoValor)/100;
+            sorteioAtual.Distributed = porcentagem2;
+            paraCadaGanhador = porcentagem2/ganhadores;    
+        }
+        else{ 
+            paraCadaGanhador = 0;
+            sorteioAtual.Distributed = 0;
+        }
         sorteioAtual.Prize = paraCadaGanhador;   
         emit SorteioInfo(sorteioAtual.Acumulado,sorteioAtual.Distributed,sorteioAtual.Prize);
-        for (uint256 l = 0; l < sorteioAtual.apostas.length; l++){
-            Aposta storage apostaAtual = apostas[_idDoSorteio][l];
-            if(apostaAtual.estado == estadoAposta.GANHOU){
-                emit Ganhadores(_idDoSorteio,apostaAtual.usuario,apostaAtual.valores);
+        
+        if (ganhadores != 0){
+            for (uint256 l = 0; l < sorteioAtual.apostas.length; l++){
+                Aposta storage apostaAtual = apostas[_idDoSorteio][l];
+                if(apostaAtual.estado == estadoAposta.GANHOU){
+                    emit Ganhadores(_idDoSorteio,apostaAtual.usuario,apostaAtual.valores);
+                }
             }
-        }
-        for (uint256 l = 0; l < sorteioAtual.apostas.length; l++){
-            Aposta storage apostaAtual = apostas[_idDoSorteio][l];
-            if(apostaAtual.estado == estadoAposta.GANHOU){
-                bool transferSuccess = payable(apostaAtual.usuario).send(sorteioAtual.Prize);
+            for (uint256 l = 0; l < sorteioAtual.apostas.length; l++){
+                Aposta storage apostaAtual = apostas[_idDoSorteio][l];
+                if(apostaAtual.estado == estadoAposta.GANHOU){
+                    bool transferSuccess = payable(apostaAtual.usuario).send(sorteioAtual.Prize);
+                }
             }
         }
         payable(msg.sender).transfer(acumulativo-sorteioAtual.Distributed);
     }
 
-    // Essa função retorna a quantidade de apostas realizadas, o valor distribuído aos vencedores e
-    // o motante acumulado.
     function exibeInforSorteio(uint256 _idDoSorteio) public view returns(uint256[3] memory){
         require(_idDoSorteio < qnt, "Esse ID eh incorreto!");
         Sorteio memory sorteioAtual = listaSorteios[_idDoSorteio];
         return [sorteioAtual.apostas.length,sorteioAtual.Prize,sorteioAtual.Acumulado];
     }
-
 }
