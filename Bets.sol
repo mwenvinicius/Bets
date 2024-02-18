@@ -238,4 +238,5 @@ contract ApostasBlock{
         Sorteio memory sorteioAtual = listaSorteios[_idDoSorteio];
         return [sorteioAtual.apostas.length,sorteioAtual.Prize,sorteioAtual.Acumulado];
     }
+    // Teste de Commit em 18/02/2024!
 }
